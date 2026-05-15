@@ -1,0 +1,4 @@
+.env
+mock_data_output/
+*.png
+*.csv
