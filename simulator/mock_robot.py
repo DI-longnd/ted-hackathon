@@ -401,6 +401,7 @@ def generate_file_records(file_start_dt, n_records):
             "paint_color_no"                              : PAINT_COLOR_NO,
             "infer_recorded_date"                         : infer_recorded_date_str,
             "serial_number"                               : i + 1,
+            "phase"                                       : phase,  # <--- THÊM CHÍNH XÁC DÒNG NÀY VÀO ĐÂY       
             "air_motor_rotation_speed_actual_value"       : rotation,
             "air_motor_electro_pneumatic_output_value_bit": electro,
             "high_pressure_level_1_voltage"               : voltage,
@@ -425,14 +426,14 @@ def main():
 
     fieldnames = [
         "robot_code", "start_time", "program_number", "step_no",
-        "paint_color_no", "infer_recorded_date", "serial_number",
+        "paint_color_no", "infer_recorded_date", "serial_number","phase",
         "air_motor_rotation_speed_actual_value",
         "air_motor_electro_pneumatic_output_value_bit",
         "high_pressure_level_1_voltage",
         "high_pressure_level_1_current",
         "paint_pressure_dcl",
         "paint_flow_rate_cc_per_min",
-        "timestamp",
+        "timestamp"
     ]
 
     current_dt = START_DATETIME
