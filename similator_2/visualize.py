@@ -16,7 +16,8 @@ CSV_PATH = "mock_welding_robot_data.csv" # Đã sửa tên file
 RANDOM_SEED = 42
 
 COLS = [
-    "wire_feed_speed_mm_min",
+    # "wire_feed_speed_mm_min",
+    "wire_feed_speed_m_min",
     # "welding_voltage_v",
     "wire_temperature_c",
     "welding_current_a",

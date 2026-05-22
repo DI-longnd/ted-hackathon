@@ -67,9 +67,11 @@ def sample_file_profile():
     return {
         "voltage_mean"        : gauss(22.0, 2.0, 18.0, 26.0),
         "current_mean"        : gauss(130, 25, 80, 180),
-        "wire_feed_mean"      : gauss(4000, 500, 3000, 5000),
+        # "wire_feed_mean"      : gauss(4000, 500, 3000, 5000),
+        # "wire_feed_std"       : gauss(15, 5, 8, 25),
+        "wire_feed_mean": gauss(4.0, 0.5, 3.0, 5.0),   # m/min
+        "wire_feed_std" : gauss(0.05, 0.01, 0.02, 0.08), # std tương ứng
         "wire_temp_base": gauss(280, 20, 240, 320), 
-        "wire_feed_std"       : gauss(15, 5, 8, 25),
         "idle_records"        : random.randint(8, 16),
         "rampup_records"      : random.randint(18, 28),
         "shutdown_records"    : random.randint(10, 18),
@@ -82,40 +84,46 @@ def sample_file_profile():
 # SENSOR GENERATORS
 # ─────────────────────────────────────────────
 
-def gen_wire_feed_speed(phase, record_idx, profile, idle_records, rampup_records, winddown_records):
-    """
-    IDLE    : ramp DOWN smooth mean+200 → mean
-    RAMPUP  : [FIX-7] ramp UP từ mean*0.6 → mean, overshoot nhẹ rồi ổn định
-    ACTIVE  : ổn định ±50 mm/min quanh mean
-    WINDDOWN: [FIX-8] giảm dần mean → 0 (dừng cấp dây để fill crater)
-    SHUTDOWN: [FIX-9] = 0 (motor dừng hoàn toàn)
-    """
+def gen_wire_feed_speed(phase, record_idx, profile, rampup_records, winddown_records):
     mean = profile["wire_feed_mean"]
     std  = profile["wire_feed_std"]
 
+    # ── Low-freq wave: sóng lớn trải dài
+    slow_wave = (mean * 0.014) * math.sin(2 * math.pi * record_idx / 22)
+
+    # ── Mid-freq wave: dao động vừa
+    mid_wave  = (mean * 0.007) * math.sin(2 * math.pi * record_idx / 9 + 1.2)
+
+    # ── Smooth noise: texture nhẹ, không răng cưa
+    smooth_noise = gauss(0, std * 0.4)
+
     if phase == "idle":
-        # Motor chưa chạy — gần 0, nhất quán với voltage và current
-        return round(gauss(0, 5, 0, 20), 1)
+        base = mean * 0.9
+        val  = base + 0.4 * slow_wave + smooth_noise
+        return round(clamp(val, mean * 0.85, mean * 0.95), 3)
 
     elif phase == "rampup":
-        # Ramp tuyến tính từ 0 → mean
         t    = record_idx / max(rampup_records, 1)
-        base = mean * t
-        return round(clamp(base + gauss(0, std), 0, mean + 60), 1)
+        base = mean * 0.9 + mean * 0.1 * t
+        damp = t  # biên độ tăng dần theo ramp
+        val  = base + damp * (slow_wave + mid_wave) + smooth_noise
+        return round(clamp(val, mean * 0.85, mean + 0.1), 3)
 
     elif phase == "active":
-        return round(gauss(mean, std, mean - 50, mean + 50), 1)
+        val = mean + slow_wave + mid_wave + smooth_noise
+        return round(clamp(val, mean - 0.12, mean + 0.12), 3)
 
     elif phase == "winddown":
-        # [FIX-8] Giảm dần mean → 0 theo tuyến tính (dừng cấp dây fill crater)
         t    = record_idx / max(winddown_records, 1)
-        base = mean * (1 - t)
-        return round(clamp(base + gauss(0, std * 0.5), 0, mean + 30), 1)
+        base = mean - mean * 0.1 * t
+        damp = 1 - 0.5 * t  # biên độ giảm dần
+        val  = base + damp * (slow_wave + mid_wave) + smooth_noise
+        return round(clamp(val, mean * 0.85, mean + 0.1), 3)
 
-    else:
-        # [FIX-9] SHUTDOWN: motor dừng hoàn toàn
-        return 0.0
-
+    else:  # shutdown
+        base = mean * 0.9
+        val  = base + 0.3 * slow_wave + smooth_noise
+        return round(clamp(val, mean * 0.85, mean * 0.95), 3)
 
 def gen_welding_voltage(phase, record_idx, profile, rampup_records, winddown_records):
     """
@@ -167,8 +175,13 @@ def gen_wire_temperature(phase, record_idx, profile, rampup_records, winddown_re
         base = 25 + (temp_base - 25) * t
         return round(clamp(base + gauss(0, 5), 20, temp_base + 10), 1)
 
+    # elif phase == "active":
+    #     return round(gauss(temp_base, 8, temp_base - 30, temp_base + 30), 1)
+
     elif phase == "active":
-        return round(gauss(temp_base, 8, temp_base - 30, temp_base + 30), 1)
+            # Sine wave smooth + noise nhỏ — nhái ảnh 3
+            sine  = 25 * math.sin(2 * math.pi * 0.05 * record_idx)
+            return round(clamp(temp_base + sine + gauss(0, 3), temp_base - 35, temp_base + 35), 1)
 
     elif phase == "winddown":
         t    = record_idx / max(winddown_records, 1)
@@ -256,7 +269,8 @@ def generate_file_records(file_start_dt, n_records):
         timestamp_str           = infer_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "+00:00"
 
         # [FIX-7,8,9] truyền thêm rampup_records, winddown_records vào wire_feed
-        wire_feed = gen_wire_feed_speed(phase, phase_idx, profile, idle_records, rampup_records, winddown_records)
+        wire_feed = gen_wire_feed_speed(phase, phase_idx, profile, rampup_records, winddown_records)
+
         # [FIX-10] truyền thêm winddown_records vào voltage
         # voltage   = gen_welding_voltage(phase, phase_idx, profile, rampup_records, winddown_records)
         wire_temp = gen_wire_temperature(phase, phase_idx, profile, rampup_records, winddown_records, shutdown_records)
@@ -270,7 +284,9 @@ def generate_file_records(file_start_dt, n_records):
             "infer_recorded_date"    : infer_recorded_date_str,
             "serial_number"          : i + 1,
             "phase"                  : phase,
-            "wire_feed_speed_mm_min" : wire_feed,
+            # "wire_feed_speed_mm_min" : wire_feed,
+            "wire_feed_speed_m_min" : wire_feed,
+
             # "welding_voltage_v"      : voltage,
             "wire_temperature_c"     : wire_temp,
             "welding_current_a"      : current,
@@ -294,7 +310,8 @@ def main():
     fieldnames = [
         "robot_code", "start_time", "program_number",
         "infer_recorded_date", "serial_number", "phase",
-        "wire_feed_speed_mm_min",
+        # "wire_feed_speed_mm_min",
+        "wire_feed_speed_m_min",
         # "welding_voltage_v",
         "wire_temperature_c",
         "welding_current_a",

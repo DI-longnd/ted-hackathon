@@ -2,3 +2,4 @@
 mock_data_output/
 *.png
 *.csv
+databricks_api/
